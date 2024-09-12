@@ -1,5 +1,6 @@
 import express from 'express';
 import { Connection, Transaction, PublicKey } from '@solana/web3.js';
+import cors from 'cors';
 
 
 // Approximation of the error function
@@ -47,6 +48,15 @@ function calculatePremium(price: number, strikeRatio: number, volatility: number
 
 const app = express();
 const port = 5000;
+
+// Enable CORS for all routes
+app.use(cors({
+    origin: 'http://localhost:3000', // Replace with your React app's URL
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+    optionsSuccessStatus: 204
+}));
 
 // Parse JSON bodies
 app.use(express.json());
