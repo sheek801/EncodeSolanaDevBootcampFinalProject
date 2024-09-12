@@ -1,4 +1,4 @@
-# Solana Asset Price Betting Program
+# BlinkBet
 
 ## Project Overview
 
@@ -62,7 +62,7 @@ This project implements a decentralized betting system on the Solana blockchain,
 - Rust for Solana program development
 - Anchor framework for smart contract development
 - TypeScript/JavaScript for frontend and backend development
-- React for the user interface
+- NextJS for the user interface
 - Dialect SDK for blinks integration
 
 ## Development Roadmap
@@ -100,8 +100,8 @@ This project implements a decentralized betting system on the Solana blockchain,
 
 1. Clone the repository:
    ```
-   git clone https://github.com/your-username/EncodeSolanaDevBootcampFinalProject
-   cd solana-betting-program
+   git clone https://github.com/sheek801/EncodeSolanaDevBootcampFinalProject
+   cd EncodeSolanaDevBootcampFinalProject
    ```
 
 2. Install dependencies:
@@ -129,13 +129,9 @@ This project implements a decentralized betting system on the Solana blockchain,
    anchor test
    ```
 
-### Deployment to Devnet
-
-[Include steps for deploying to Solana devnet, similar to the previous README]
-
 ## Contributing
 
-We welcome contributions to the Solana Asset Price Betting Program! Please read our contributing guidelines before submitting pull requests.
+We welcome contributions to BlinkBet! Please read our contributing guidelines before submitting pull requests.
 
 ## License
 
