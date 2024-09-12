@@ -63,7 +63,6 @@ This project implements a decentralized betting system on the Solana blockchain,
 - Anchor framework for smart contract development
 - TypeScript/JavaScript for frontend and backend development
 - React for the user interface
-- AWS Lambda or similar for serverless functions
 - Dialect SDK for blinks integration
 
 ## Development Roadmap
@@ -101,7 +100,7 @@ This project implements a decentralized betting system on the Solana blockchain,
 
 1. Clone the repository:
    ```
-   git clone https://github.com/your-username/solana-betting-program.git
+   git clone https://github.com/your-username/EncodeSolanaDevBootcampFinalProject
    cd solana-betting-program
    ```
 
