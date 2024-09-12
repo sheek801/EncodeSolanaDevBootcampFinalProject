@@ -18,7 +18,7 @@ export default function DashboardFeature() {
   const { isLoading, error, data } = useQuery({
     queryKey: ['action'],
     queryFn: () =>
-      fetch('http://localhost:5001/price/action').then(
+      fetch('http://localhost:5000/price/action').then(
         (res) => res.json()
       ),
   });
