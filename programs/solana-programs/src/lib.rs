@@ -13,7 +13,7 @@ pub mod solana_betting {
         ctx: Context<PlaceBet>,
         notional_amount: u64,
         premium_percentage: u64,
-        strike_price: u64,
+        strike_price_percentage: u64,
         strike_cap_percentage: u64,
         token: Pubkey,
     ) -> Result<()> {
@@ -22,10 +22,13 @@ pub mod solana_betting {
         let clock = Clock::get()?;
 
         // Validate input
+        // locked in at 10% max premium
         require!(premium_percentage <= 1000, BettingError::PremiumTooHigh);
+        // strike cap must be higher than strike price
         require!(strike_cap_percentage > strike_price, BettingError::InvalidStrikeCap);
 
         // Calculate premium amount
+        // premium = notional_amount * premium_percentage / 10000
         let premium_amount = notional_amount
             .checked_mul(premium_percentage)
             .ok_or(BettingError::CalculationError)?
@@ -33,8 +36,10 @@ pub mod solana_betting {
             .ok_or(BettingError::CalculationError)?;
 
         // Calculate maximum payout
+        // max_payout = notional_amount * (strike_cap_percentage - strike_percentage) / 10000
+        // e.g. a value of 18000 strike_cap_percentage means 180% cap
         let max_payout = notional_amount
-            .checked_mul(strike_cap_percentage)
+            .checked_mul(strike_cap_percentage - strike_price_percentage)
             .ok_or(BettingError::CalculationError)?
             .checked_div(10000)
             .ok_or(BettingError::CalculationError)?;
@@ -66,13 +71,20 @@ pub mod solana_betting {
             .checked_add(max_payout)
             .ok_or(BettingError::CalculationError)?;
 
-        // Initialize bet
+        let start_price = get_current_price(&ctx.accounts.pyth_price_account)?;
+        let strike_price = start_price
+            .checked_mul(strike_price_percentage)
+            .ok_or(BettingError::CalculationError)?
+            .checked_div(10000)
+            .ok_or(BettingError::CalculationError)?;
+
+        // Initialize bet struct
         bet.user = *user.key;
         bet.has_claimed = false;
         bet.expiry = clock.unix_timestamp + 86400; // 1 day from now
         bet.notional_amount = notional_amount;
         bet.premium_amount = premium_amount;
-        bet.start_price = get_current_price(&ctx.accounts.pyth_price_account)?;
+        bet.start_price = start_price;
         bet.strike_price = strike_price;
         bet.strike_cap_percentage = strike_cap_percentage;
         bet.token = token;
@@ -84,7 +96,121 @@ pub mod solana_betting {
         Ok(())
     }
 
-    // ... (claim_bet function remains the same)
+    pub fn claim_bet(ctx: Context<ClaimBet>) -> Result<()> {
+        let bet = &mut ctx.accounts.bet;
+        let clock = Clock::get()?;
+
+        require!(!bet.has_claimed, BettingError::AlreadyClaimed);
+        require!(clock.unix_timestamp > bet.expiry, BettingError::BetNotExpired);
+        require!(clock.unix_timestamp <= bet.expiry + 86400, BettingError::ClaimPeriodExpired);
+
+        let current_price = get_current_price(&ctx.accounts.pyth_price_account)?;
+
+        // did the option expire in the money
+        let is_winning_bet = current_price >= bet.strike_price;
+        let mut excess_to_unlock = if !is_winning_bet {
+            // if losing bet you can unlock everything
+            notional_amount
+            .checked_mul(strike_cap_percentage - strike_price_percentage)
+            .ok_or(BettingError::CalculationError)?
+            .checked_div(10000)
+            .ok_or(BettingError::CalculationError)?;
+        };
+
+        if is_winning_bet {
+            let cap_price = bet
+                            .start_price
+                            .checked_mul(bet.strike_cap_percentage)
+                            .ok_or(BettingError::CalculationError)?
+                            .checked_div(10000)
+                            .ok_or(BettingError::CalculationError)?;
+            // payout capped at cap price
+            let payout_price = current_price > cap_price ? cap_price : current_price;
+            // get max payout, will later be used for excess unlocking
+            let max_payout = bet
+                            .notional_amount
+                            .checked_mul(cap_price - bet.strike_price)
+                            .ok_or(BettingError::CalculationError)?
+                            .checked_div(bet.start_price)
+                            .ok_or(BettingError::CalculationError)?;
+            let payout = (payout_price - bet.strike_price)
+                        .checked_div(bet.start_price)
+                        .ok_or(BettingError::CalculationError)?
+                        .checked_mul(bet.notional_amount)
+                        .ok_or(BettingError::CalculationError)?; 
+
+            // Transfer payout to user
+            let cpi_accounts = Transfer {
+                from: ctx.accounts.contract_usdc_account.to_account_info(),
+                to: ctx.accounts.user_usdc_account.to_account_info(),
+                authority: ctx.accounts.contract_state.to_account_info(),
+            };
+            let cpi_program = ctx.accounts.token_program.to_account_info();
+            let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+            token::transfer(cpi_ctx, payout)?;
+
+            // unlock the excess if any from locked max payout and actual payout
+            excess_to_unlock = max_payout - payout;
+        }
+
+        // Update contract state
+        ctx.accounts.contract_state.total_locked_usdc = ctx
+        .accounts
+        .contract_state
+        .total_locked_usdc
+        .checked_sub(excess_to_unlock)
+        .ok_or(BettingError::CalculationError)?;
+
+        bet.has_claimed = true;
+
+        Ok(())
+    }
+
+    pub fn unlock_expired_bet(ctx: Context<ClaimBet>, bet_id: Pubkey) -> Result<()> {
+        let bet = &mut ctx.accounts.bet;
+        let clock = Clock::get()?;
+
+        // Check that the bet hasn't been claimed
+        require!(!bet.has_claimed, BettingError::AlreadyClaimed);
+
+        // Check that expiry + 86400 has passed
+        require!(
+            clock.unix_timestamp > bet.expiry + 86400,
+            BettingError::ClaimPeriodNotExpired
+        );
+
+        // Calculate max payout
+        let cap_price = bet
+            .start_price
+            .checked_mul(bet.strike_cap_percentage)
+            .ok_or(BettingError::CalculationError)?
+            .checked_div(10000)
+            .ok_or(BettingError::CalculationError)?;
+
+        let max_payout = bet
+            .notional_amount
+            .checked_mul(cap_price.checked_sub(bet.strike_price).ok_or(BettingError::CalculationError)?)
+            .ok_or(BettingError::CalculationError)?
+            .checked_div(bet.start_price)
+            .ok_or(BettingError::CalculationError)?;
+
+        // Update contract state
+        ctx.accounts.contract_state.total_locked_usdc = ctx
+            .accounts
+            .contract_state
+            .total_locked_usdc
+            .checked_sub(max_payout)
+            .ok_or(BettingError::CalculationError)?;
+
+        // Mark bet as claimed
+        // this prevents the owner unlocking the same bet multiple times
+        bet.has_claimed = true;
+
+        msg!("Unlocked expired bet with ID: {:?}", bet_id);
+        msg!("Unlocked amount: {}", max_payout);
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -150,6 +276,8 @@ pub enum BettingError {
     InsufficientContractBalance,
     #[msg("Pyth error")]
     PythError,
+    #[msg("Claim period has not expired yet")]
+    ClaimPeriodNotExpired
 }
 
 impl Bet {
